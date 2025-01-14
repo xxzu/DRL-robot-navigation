@@ -12,30 +12,32 @@ from replay_buffer import ReplayBuffer
 from velodyne_env import GazeboEnv
 
 
+
+  
 def evaluate(network, epoch, eval_episodes=10):
-    avg_reward = 0.0
-    col = 0
-    for _ in range(eval_episodes):
+    avg_reward = 0.0  # 平均奖励初始化
+    col = 0  # 统计碰撞次数
+    for _ in range(eval_episodes):  # 评估多个回合
         count = 0
-        state = env.reset()
+        state = env.reset()  # 重置环境
         done = False
-        while not done and count < 501:
-            action = network.get_action(np.array(state))
-            a_in = [(action[0] + 1) / 2, action[1]]
-            state, reward, done, _ = env.step(a_in)
-            avg_reward += reward
+        while not done and count < 501:  # 每回合最多 501 步
+            action = network.get_action(np.array(state))  # 通过 Actor 网络生成动作
+            a_in = [(action[0] + 1) / 2, action[1]]  # 将动作范围调整为环境需要的范围
+            state, reward, done, _ = env.step(a_in)  # 执行动作，获取反馈
+            avg_reward += reward  # 累计奖励
             count += 1
-            if reward < -90:
+            if reward < -90:  # 如果奖励表示发生碰撞，增加碰撞计数
                 col += 1
-    avg_reward /= eval_episodes
-    avg_col = col / eval_episodes
+    avg_reward /= eval_episodes  # 计算平均奖励
+    avg_col = col / eval_episodes  # 计算平均碰撞次数
     print("..............................................")
     print(
         "Average Reward over %i Evaluation Episodes, Epoch %i: %f, %f"
         % (eval_episodes, epoch, avg_reward, avg_col)
     )
     print("..............................................")
-    return avg_reward
+    return avg_reward  # 返回平均奖励
 
 
 class Actor(nn.Module):
@@ -69,15 +71,16 @@ class Critic(nn.Module):
         self.layer_6 = nn.Linear(600, 1)
 
     def forward(self, s, a):
-        s1 = F.relu(self.layer_1(s))
+        s1 = F.relu(self.layer_1(s)) # 状态特征提取层，ReLU 激活
         self.layer_2_s(s1)
         self.layer_2_a(a)
         s11 = torch.mm(s1, self.layer_2_s.weight.data.t())
-        s12 = torch.mm(a, self.layer_2_a.weight.data.t())
-        s1 = F.relu(s11 + s12 + self.layer_2_a.bias.data)
+        s12 = torch.mm(a, self.layer_2_a.weight.data.t()) #执行矩阵乘法，将动作特征 a 与转置的权重矩阵相乘。
+        s1 = F.relu(s11 + s12 + self.layer_2_a.bias.data) # 状态与动作特征融合  将状态特征映射 s11 与动作特征映射 s12 相加。两者形状均为 [batch_size, 600]，可以直接逐元素相加。
+
         q1 = self.layer_3(s1)
 
-        s2 = F.relu(self.layer_4(s))
+        s2 = F.relu(self.layer_4(s)) # 状态特征提取层，ReLU 激活
         self.layer_5_s(s2)
         self.layer_5_a(a)
         s21 = torch.mm(s2, self.layer_5_s.weight.data.t())
@@ -91,10 +94,10 @@ class Critic(nn.Module):
 class TD3(object):
     def __init__(self, state_dim, action_dim, max_action):
         # Initialize the Actor network
-        self.actor = Actor(state_dim, action_dim).to(device)
+        self.actor = Actor(state_dim, action_dim).to(device)  #  
         self.actor_target = Actor(state_dim, action_dim).to(device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
+        self.actor_target.load_state_dict(self.actor.state_dict()) #网络权重初始化：
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters()) #优化器，用于更新 Actor 网络的权重。
 
         # Initialize the Critic networks
         self.critic = Critic(state_dim, action_dim).to(device)
@@ -103,8 +106,8 @@ class TD3(object):
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
 
         self.max_action = max_action
-        self.writer = SummaryWriter()
-        self.iter_count = 0
+        self.writer = SummaryWriter() #记录训练过程的损失和 Q 值等信息，供 TensorBoard 可视化。
+        self.iter_count = 0 #记录训练次数。
 
     def get_action(self, state):
         # Function to get the action from the actor
@@ -119,15 +122,16 @@ class TD3(object):
         batch_size=100,
         discount=1,
         tau=0.005,
-        policy_noise=0.2,  # discount=0.99
-        noise_clip=0.5,
-        policy_freq=2,
+        policy_noise=0.2,  # discount=0.99 # 动作噪声，用于目标网络
+        noise_clip=0.5,  # 限制噪声范围
+        policy_freq=2, # Actor 网络更新频率
     ):
-        av_Q = 0
-        max_Q = -inf
-        av_loss = 0
+        av_Q = 0  # 平均 Q 值初始化
+        max_Q = -inf  # 最大 Q 值初始化
+        av_loss = 0  # 平均损失初始化
         for it in range(iterations):
             # sample a batch from the replay buffer
+            # 从经验回放缓冲区采样一个批量
             (
                 batch_states,
                 batch_actions,
@@ -157,7 +161,7 @@ class TD3(object):
             av_Q += torch.mean(target_Q)
             max_Q = max(max_Q, torch.max(target_Q))
             # Calculate the final Q value from the target network parameters by using Bellman equation
-            target_Q = reward + ((1 - done) * discount * target_Q).detach()
+            target_Q = reward + ((1 - done) * discount * target_Q).detach() # 根据 Bellman 方程计算目标 Q 值
 
             # Get the Q values of the basis networks with the current parameters
             current_Q1, current_Q2 = self.critic(state, action)
@@ -166,11 +170,14 @@ class TD3(object):
             loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
             # Perform the gradient descent
+            # 反向传播并更新 Critic 网络参数
             self.critic_optimizer.zero_grad()
             loss.backward()
             self.critic_optimizer.step()
 
+            # 每隔 policy_freq 次更新 Actor 网络和目标网络
             if it % policy_freq == 0:
+                # 最大化 Actor 的 Q 值
                 # Maximize the actor output value by performing gradient descent on negative Q values
                 # (essentially perform gradient ascent)
                 actor_grad, _ = self.critic(state, self.actor(state))
@@ -181,6 +188,7 @@ class TD3(object):
 
                 # Use soft update to update the actor-target network parameters by
                 # infusing small amount of current parameters
+                # 使用软更新更新目标 Actor 网络参数
                 for param, target_param in zip(
                     self.actor.parameters(), self.actor_target.parameters()
                 ):
@@ -189,6 +197,7 @@ class TD3(object):
                     )
                 # Use soft update to update the critic-target network parameters by infusing
                 # small amount of current parameters
+                # 使用软更新更新目标 Critic 网络参数
                 for param, target_param in zip(
                     self.critic.parameters(), self.critic_target.parameters()
                 ):
@@ -285,8 +294,8 @@ random_action = []
 while timestep < max_timesteps:
 
     # On termination of episode
-    if done:
-        if timestep != 0:
+    if done:  # 回合结束时的处理
+        if timestep != 0: # 如果不是第一次迭代
             network.train(
                 replay_buffer,
                 episode_timesteps,
@@ -300,14 +309,16 @@ while timestep < max_timesteps:
 
         if timesteps_since_eval >= eval_freq:
             print("Validating")
-            timesteps_since_eval %= eval_freq
+            timesteps_since_eval %= eval_freq #重置评估次数计数
             evaluations.append(
                 evaluate(network=network, epoch=epoch, eval_episodes=eval_ep)
             )
-            network.save(file_name, directory="./pytorch_models")
+            network.save(file_name, directory="./pytorch_models") # 保存模型
             np.save("./results/%s" % (file_name), evaluations)
             epoch += 1
-
+        
+        
+         # 重置环境和回合相关变量
         state = env.reset()
         done = False
 
